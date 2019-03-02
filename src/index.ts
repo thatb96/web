@@ -3,10 +3,14 @@ import path from 'path';
 import rimraf from 'rimraf';
 import chalk from 'chalk';
 import ora from 'ora';
+import yargs from 'yargs-parser';
+import isBuiltin from 'is-builtin-module';
+
 import * as rollup from 'rollup';
 import rollupPluginNodeResolve from 'rollup-plugin-node-resolve';
 import rollupPluginCommonjs from 'rollup-plugin-commonjs';
-import yargs from 'yargs-parser';
+import rollupPluginNodeBuiltins from '@joseph184/rollup-plugin-node-builtins';
+import rollupPluginNodeGlobals from 'rollup-plugin-node-globals';
 
 const cwd = process.cwd();
 let spinner = ora(chalk.bold(`@pika/web`) + ` installing...`);
@@ -15,7 +19,8 @@ function showHelp() {
   console.log(`${chalk.bold(`@pika/web`)} - Install npm dependencies to run natively on the web.`);
   console.log(`
   Options
-    --strict  Support only ESM dependencies.
+    --strict    Require a pure ESM dependency tree (will fail on any Common.js file).
+    --builtins  Polyfill & shim Node.js builtin modules (ex: "path", "fs", etc.)
 `);
 }
 
@@ -29,7 +34,7 @@ function transformWebModuleFilename(depName:string):string {
   return depName.replace('/', '--');
 }
 
-export async function install(arrayOfDeps: string[], {isWhitelist, supportsCJS}: {isWhitelist: boolean, supportsCJS?: boolean}) {
+export async function install(arrayOfDeps: string[], {isWhitelist, supportsCJS, supportNodeBuiltins}: {isWhitelist: boolean, supportsCJS?: boolean, supportNodeBuiltins?: boolean}) {
   if (arrayOfDeps.length === 0) {
     logError('no dependencies found.');
     return;
@@ -64,11 +69,12 @@ export async function install(arrayOfDeps: string[], {isWhitelist, supportsCJS}:
   const inputOptions = {
     input: depObject,
     plugins: [
+      supportNodeBuiltins && rollupPluginNodeBuiltins(),
       rollupPluginNodeResolve({
         module: true, // Default: true
         jsnext: false,  // Default: false
-        main: supportsCJS,  // Default: true
         browser: false,  // Default: false
+        main: supportsCJS,  // Default: true
         modulesOnly: !supportsCJS, // Default: false
         extensions: [ '.mjs', '.js', '.json' ],  // Default: [ '.mjs', '.js', '.json', '.node' ]
         jail: path.join(cwd, 'node_modules'),
@@ -77,8 +83,16 @@ export async function install(arrayOfDeps: string[], {isWhitelist, supportsCJS}:
       }),
       supportsCJS && rollupPluginCommonjs({
         extensions: [ '.js', '.cjs' ],  // Default: [ '.js' ]
-      })
-    ]
+        ignoreGlobal: supportNodeBuiltins, // false normally, unless Node Builtins are supported.
+      }),
+      supportNodeBuiltins && rollupPluginNodeGlobals(),
+    ],
+    onwarn: ((err, defaultOnWarn) => {
+      if (err.code === 'UNRESOLVED_IMPORT' && isBuiltin(err.source)) {
+        err.message += `\n  ${chalk.dim('[@pika/web: Use the --builtins CLI flag to polyfill/shim Node.js built-in modules.]')}`;
+      }
+      defaultOnWarn(err);
+    }) as any
   };
   const outputOptions = {
     dir: path.join(cwd, "web_modules"),
@@ -94,7 +108,7 @@ export async function install(arrayOfDeps: string[], {isWhitelist, supportsCJS}:
 
 
 export async function cli(args: string[]) {
-  const {help, strict} = yargs(args);
+  const {help, strict, builtins} = yargs(args);
 
 	if (help) {
     showHelp();
@@ -106,7 +120,7 @@ export async function cli(args: string[]) {
   const arrayOfDeps = isWhitelist ? cwdManifest['@pika/web'].webDependencies : Object.keys(cwdManifest.dependencies || {});
   spinner.start();
   const startTime = Date.now();
-  const result = await install(arrayOfDeps, {isWhitelist, supportsCJS: !strict});
+  const result = await install(arrayOfDeps, {isWhitelist, supportsCJS: !strict, supportNodeBuiltins: builtins});
   if (result) {
     spinner.succeed(chalk.green.bold(`@pika/web`) + ` installed web-native dependencies. ` + chalk.dim(`[${((Date.now() - startTime) / 1000).toFixed(2)}s]`));
   }
