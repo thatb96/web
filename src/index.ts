@@ -3,10 +3,12 @@ import path from 'path';
 import rimraf from 'rimraf';
 import chalk from 'chalk';
 import ora from 'ora';
+import yargs from 'yargs-parser';
+
 import * as rollup from 'rollup';
 import rollupPluginNodeResolve from 'rollup-plugin-node-resolve';
 import rollupPluginCommonjs from 'rollup-plugin-commonjs';
-import yargs from 'yargs-parser';
+import rollupPluginJson from 'rollup-plugin-json';
 
 const cwd = process.cwd();
 let spinner = ora(chalk.bold(`@pika/web`) + ` installing...`);
@@ -74,6 +76,12 @@ export async function install(arrayOfDeps: string[], {isWhitelist, supportsCJS}:
         jail: path.join(cwd, 'node_modules'),
         // whether to prefer built-in modules (e.g. `fs`, `path`) or local ones with the same names
         preferBuiltins: false,  // Default: true
+      }),
+      rollupPluginJson({
+        include: 'node_modules/**',
+        preferConst: true,
+        indent: '  ',
+        // compact: true, // Default: false
       }),
       supportsCJS && rollupPluginCommonjs({
         extensions: [ '.js', '.cjs' ],  // Default: [ '.js' ]
